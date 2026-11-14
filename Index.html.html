@@ -5,119 +5,302 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pemindai QR Absensi Siswa</title>
+
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
 <style>
+* {
+  box-sizing: border-box;
+}
+
 body {
-  font-family:Arial,sans-serif;
-  max-width:600px;
-  margin:20px auto;
-  padding:16px;
-  text-align:center;
-  background:#f3f6fb;
-  color:#172033;
+  font-family: Arial, sans-serif;
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 16px;
+  text-align: center;
+  background: #f3f6fb;
+  color: #172033;
 }
+
 .box {
-  background:white;
-  padding:18px;
-  border-radius:14px;
-  box-shadow:0 3px 12px #0001;
+  background: white;
+  padding: 18px;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px #0001;
 }
-#reader { width:100%; margin:15px auto; }
+
+#reader {
+  width: 100%;
+  margin: 15px auto;
+}
+
+button, select {
+  width: 100%;
+  border: 0;
+  padding: 13px;
+  margin: 6px 0;
+  border-radius: 8px;
+  font-size: 15px;
+}
+
 button {
-  border:0;
-  background:#2457d6;
-  color:white;
-  padding:12px 20px;
-  border-radius:8px;
-  cursor:pointer;
+  background: #2457d6;
+  color: white;
+  cursor: pointer;
 }
+
+button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+#stopBtn {
+  background: #dc3545;
+}
+
 #hasil {
-  background:#eef4ff;
-  padding:13px;
-  border-radius:8px;
-  overflow-wrap:anywhere;
+  background: #eef4ff;
+  padding: 13px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+#cameraSelect {
+  border: 1px solid #ccd3df;
+  background: white;
+}
+
+small {
+  color: #64748b;
 }
 </style>
 </head>
+
 <body>
+
 <div class="box">
   <h2>Pemindai QR Kartu Siswa</h2>
   <p>Arahkan QR Code pada kartu siswa ke kamera.</p>
+
+  <select id="cameraSelect">
+    <option value="">Memeriksa kamera...</option>
+  </select>
+
   <div id="reader"></div>
-  <div id="hasil">Menunggu kamera...</div>
-  <p><button id="startBtn">Aktifkan Kamera</button></p>
-  <p><button id="closeBtn">Tutup Pemindai</button></p>
+
+  <div id="hasil">
+    Tekan tombol Aktifkan Kamera untuk memulai.
+  </div>
+
+  <button id="startBtn">Aktifkan Kamera</button>
+  <button id="stopBtn" disabled>Hentikan Kamera</button>
+  <button id="closeBtn">Tutup Pemindai</button>
+
+  <p><small>Pastikan browser sudah diberikan izin menggunakan kamera.</small></p>
 </div>
 
 <script>
 let qrScanner = null;
 let locked = false;
+let cameras = [];
+let cameraAktif = false;
 
-const hasil = document.getElementById('hasil');
+const hasil = document.getElementById("hasil");
+const cameraSelect = document.getElementById("cameraSelect");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const closeBtn = document.getElementById("closeBtn");
 
+function tampilkanPesan(pesan) {
+  hasil.textContent = pesan;
+}
+
+// Memeriksa daftar kamera
+async function loadCameras() {
+  try {
+    if (!window.Html5Qrcode) {
+      tampilkanPesan("Pustaka QR gagal dimuat. Periksa koneksi internet.");
+      return;
+    }
+
+    cameras = await Html5Qrcode.getCameras();
+
+    cameraSelect.innerHTML = "";
+
+    if (!cameras || cameras.length === 0) {
+      cameraSelect.innerHTML =
+        '<option value="">Kamera tidak ditemukan</option>';
+
+      tampilkanPesan("Tidak ada kamera yang terdeteksi.");
+      return;
+    }
+
+    cameras.forEach((camera, index) => {
+      const option = document.createElement("option");
+      option.value = camera.id;
+      option.textContent = camera.label || "Kamera " + (index + 1);
+      cameraSelect.appendChild(option);
+    });
+
+    // Pilih kamera belakang jika tersedia.
+    const backCamera = cameras.find(camera =>
+      /back|rear|environment|belakang/i.test(camera.label || "")
+    );
+
+    if (backCamera) {
+      cameraSelect.value = backCamera.id;
+    } else {
+      cameraSelect.value = cameras[0].id;
+    }
+
+    tampilkanPesan("Kamera ditemukan. Tekan Aktifkan Kamera.");
+  } catch (err) {
+    tampilkanPesan(
+      "Gagal mendeteksi kamera: " +
+      (err.message || err)
+    );
+  }
+}
+
+// Mengaktifkan kamera
 async function startCamera() {
-  locked = false;
+  if (cameraAktif) return;
 
   if (!window.Html5Qrcode) {
-    hasil.textContent = 'Pustaka QR tidak termuat. Periksa koneksi internet.';
+    tampilkanPesan("Pustaka QR belum termuat. Periksa koneksi internet.");
     return;
   }
 
   try {
-    if (qrScanner) {
-      try { await qrScanner.stop(); } catch(e) {}
-      try { qrScanner.clear(); } catch(e) {}
+    locked = false;
+    startBtn.disabled = true;
+
+    if (cameras.length === 0) {
+      cameras = await Html5Qrcode.getCameras();
     }
 
-    qrScanner = new Html5Qrcode('reader');
+    if (!cameras || cameras.length === 0) {
+      throw new Error("Kamera tidak ditemukan.");
+    }
+
+    let cameraId = cameraSelect.value;
+
+    if (!cameraId) {
+      cameraId = cameras[0].id;
+    }
+
+    qrScanner = new Html5Qrcode("reader");
+
+    tampilkanPesan("Sedang mengaktifkan kamera...");
 
     await qrScanner.start(
-      { facingMode:'environment' },
+      cameraId,
       {
-        fps:10,
-        qrbox:{width:240,height:240},
-        aspectRatio:1
+        fps: 10,
+        qrbox: { width: 240, height: 240 },
+        aspectRatio: 1
       },
-      async decodedText => {
+
+      // Jika QR berhasil dibaca
+      async function(decodedText) {
         if (locked) return;
+
         locked = true;
 
         const code = String(decodedText).trim();
-        hasil.textContent = 'QR terbaca: ' + code;
 
-        try { await qrScanner.stop(); } catch(e) {}
+        tampilkanPesan("QR terbaca: " + code);
 
+        try {
+          await qrScanner.stop();
+        } catch (e) {}
+
+        cameraAktif = false;
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+
+        // Kirim hasil ke dashboard yang membuka scanner
         if (window.opener && !window.opener.closed) {
           window.opener.postMessage({
-            type:'QR_SCAN',
-            code:code
-          }, '*');
+            type: "QR_SCAN",
+            code: code
+          }, "*");
 
-          hasil.textContent = 'Kode dikirim ke dashboard: ' + code;
+          tampilkanPesan(
+            "Kode berhasil dibaca dan dikirim: " + code
+          );
         } else {
-          hasil.textContent = 'Dashboard tidak terhubung. Tutup halaman ini dan buka scanner dari dashboard.';
-          locked = false;
+          tampilkanPesan(
+            "QR terbaca: " + code +
+            ". Namun dashboard tidak terhubung. " +
+            "Silakan salin kode ini atau buka scanner dari dashboard."
+          );
         }
       },
-      () => {}
+
+      // Pesan ketika QR belum terbaca
+      function(errorMessage) {}
     );
 
-    hasil.textContent = 'Kamera aktif. Silakan pindai kartu siswa.';
+    cameraAktif = true;
+    stopBtn.disabled = false;
+
+    tampilkanPesan("Kamera aktif. Silakan pindai QR siswa.");
+
   } catch (err) {
-    hasil.textContent = 'Kamera gagal dibuka: ' + err;
+    cameraAktif = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    let pesan = err.message || String(err);
+
+    tampilkanPesan(
+      "KAMERA GAGAL DIBUKA: " + pesan +
+      ". Periksa izin kamera, HTTPS, dan penggunaan kamera oleh aplikasi lain."
+    );
   }
 }
 
-document.getElementById('startBtn').addEventListener('click', startCamera);
-document.getElementById('closeBtn').addEventListener('click', async () => {
-  if (qrScanner) {
-    try { await qrScanner.stop(); } catch(e) {}
-    try { qrScanner.clear(); } catch(e) {}
+// Menghentikan kamera
+async function stopCamera() {
+  if (qrScanner && cameraAktif) {
+    try {
+      await qrScanner.stop();
+    } catch (e) {}
+
+    try {
+      await qrScanner.clear();
+    } catch (e) {}
   }
+
+  cameraAktif = false;
+  locked = false;
+
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+
+  tampilkanPesan("Kamera dihentikan.");
+}
+
+// Tombol aktivasi
+startBtn.addEventListener("click", startCamera);
+
+// Tombol berhenti
+stopBtn.addEventListener("click", stopCamera);
+
+// Tombol tutup
+closeBtn.addEventListener("click", async function() {
+  await stopCamera();
   window.close();
 });
 
-startCamera();
+// Deteksi kamera ketika halaman siap.
+// Kamera TIDAK langsung dinyalakan.
+window.addEventListener("load", loadCameras);
 </script>
+
 </body>
 </html>
