@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pemindai QR Absensi Siswa</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+body {
+  font-family:Arial,sans-serif;
+  max-width:600px;
+  margin:20px auto;
+  padding:16px;
+  text-align:center;
+  background:#f3f6fb;
+  color:#172033;
+}
+.box {
+  background:white;
+  padding:18px;
+  border-radius:14px;
+  box-shadow:0 3px 12px #0001;
+}
+#reader { width:100%; margin:15px auto; }
+button {
+  border:0;
+  background:#2457d6;
+  color:white;
+  padding:12px 20px;
+  border-radius:8px;
+  cursor:pointer;
+}
+#hasil {
+  background:#eef4ff;
+  padding:13px;
+  border-radius:8px;
+  overflow-wrap:anywhere;
+}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>Pemindai QR Kartu Siswa</h2>
+  <p>Arahkan QR Code pada kartu siswa ke kamera.</p>
+  <div id="reader"></div>
+  <div id="hasil">Menunggu kamera...</div>
+  <p><button id="startBtn">Aktifkan Kamera</button></p>
+  <p><button id="closeBtn">Tutup Pemindai</button></p>
+</div>
+
+<script>
+let qrScanner = null;
+let locked = false;
+
+const hasil = document.getElementById('hasil');
+
+async function startCamera() {
+  locked = false;
+
+  if (!window.Html5Qrcode) {
+    hasil.textContent = 'Pustaka QR tidak termuat. Periksa koneksi internet.';
+    return;
+  }
+
+  try {
+    if (qrScanner) {
+      try { await qrScanner.stop(); } catch(e) {}
+      try { qrScanner.clear(); } catch(e) {}
+    }
+
+    qrScanner = new Html5Qrcode('reader');
+
+    await qrScanner.start(
+      { facingMode:'environment' },
+      {
+        fps:10,
+        qrbox:{width:240,height:240},
+        aspectRatio:1
+      },
+      async decodedText => {
+        if (locked) return;
+        locked = true;
+
+        const code = String(decodedText).trim();
+        hasil.textContent = 'QR terbaca: ' + code;
+
+        try { await qrScanner.stop(); } catch(e) {}
+
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({
+            type:'QR_SCAN',
+            code:code
+          }, '*');
+
+          hasil.textContent = 'Kode dikirim ke dashboard: ' + code;
+        } else {
+          hasil.textContent = 'Dashboard tidak terhubung. Tutup halaman ini dan buka scanner dari dashboard.';
+          locked = false;
+        }
+      },
+      () => {}
+    );
+
+    hasil.textContent = 'Kamera aktif. Silakan pindai kartu siswa.';
+  } catch (err) {
+    hasil.textContent = 'Kamera gagal dibuka: ' + err;
+  }
+}
+
+document.getElementById('startBtn').addEventListener('click', startCamera);
+document.getElementById('closeBtn').addEventListener('click', async () => {
+  if (qrScanner) {
+    try { await qrScanner.stop(); } catch(e) {}
+    try { qrScanner.clear(); } catch(e) {}
+  }
+  window.close();
+});
+
+startCamera();
+</script>
+</body>
+</html>
